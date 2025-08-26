@@ -1,11 +1,11 @@
-from flask import Flask, request, redirect, session, render_template, url_for
+from flask import Flask, request, redirect, session, url_for
 import os, secrets, requests, base64
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")  # set your own in prod
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 
-CLIENT_ID = "Ov23liJdlBTVTbVcIbs2"   # <-- your GitHub Client ID
-CLIENT_SECRET = "8f384e03ee450e44d0fdbeec04d798d5e1143c98"  # <-- put your GitHub Client Secret here
+CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET")
 
 @app.route("/")
 def home():
@@ -13,7 +13,6 @@ def home():
 
 @app.route("/login")
 def login():
-    # CSRF protection
     state = secrets.token_urlsafe(16)
     session["oauth_state"] = state
     authorize_url = (
@@ -21,13 +20,11 @@ def login():
         f"?client_id={CLIENT_ID}"
         f"&scope=repo"
         f"&state={state}"
-        # default callback is what you set in GitHub: /callback
     )
     return redirect(authorize_url)
 
 @app.route("/callback")
 def callback():
-    # Verify state
     state = request.args.get("state")
     if not state or state != session.get("oauth_state"):
         return "State mismatch. Try logging in again.", 400
@@ -36,7 +33,6 @@ def callback():
     if not code:
         return "Missing code from GitHub.", 400
 
-    # Exchange code for access token
     token_res = requests.post(
         "https://github.com/login/oauth/access_token",
         headers={"Accept": "application/json"},
@@ -75,13 +71,11 @@ def upload():
     filename = file.filename
     content_b64 = base64.b64encode(file.read()).decode()
 
-    # Upload file (creates if not exists)
     url = f"https://api.github.com/repos/{repo}/contents/{filename}"
     headers = {"Authorization": f"token {token}"}
     data = {"message": f"Add {filename} via Git Helper", "content": content_b64}
     r = requests.put(url, json=data, headers=headers, timeout=30)
 
-    # If file exists, GitHub returns 422 and requires 'sha' to update → handle overwrite
     if r.status_code == 422 and "sha" not in data:
         meta = requests.get(url, headers=headers).json()
         sha = meta.get("sha")
@@ -92,6 +86,7 @@ def upload():
     if r.status_code in (200, 201):
         return f"✅ Uploaded! <a href='https://github.com/{repo}'>Open repo</a>"
     return f"❌ Error: {r.status_code} {r.text}"
-    
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
